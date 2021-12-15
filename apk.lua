@@ -43,6 +43,13 @@ local apk = class('APK')
 
 local endiltle = class('ENDILTLE')
 function endiltle:init(br)
+      br.is_little_endian = true
+      self.zero_bytes = br:read_bytes(8)
+end
+
+local endibige = class('ENDIBIGE')
+function endibige:init(br)
+      br.is_little_endian = false
       self.zero_bytes = br:read_bytes(8)
 end
 
@@ -92,12 +99,15 @@ function packfsls:init(br)
 
       self.items = {}
       for i = 1, self.count do
+            local index = tonumber(br:read_int64())
+            local file_offset = tonumber(br:read_int64())
+            local size = tonumber(br:read_int64())
+            local uarr = br:read_bytes(16)
+
             table.insert(self.items, {
-                  index = br:read_int32(),
-                  u1 = br:read_int32(),
-                  file_offset = tonumber(br:read_int64()),
-                  size = tonumber(br:read_int64()),
-                  uarr = br:read_bytes(16),
+                  index = index,
+                  apkfile = apk(br:new_from_position(file_offset)),
+                  uarr = uarr,
             })
       end
 
@@ -161,12 +171,9 @@ local sections = {
       GENESTRT = genestrt,
 }
 
-function apk:init(br, path)
-      local init_position = br.position
+function apk:init(br)
       self.binaryreader = br
       self.sections = {}
-      self.path = path
-      lfs.mkdir(path)
 
       while not self.binaryreader:is_eof() do
             local section_name = self.binaryreader:read_string(8)
@@ -178,32 +185,35 @@ function apk:init(br, path)
                   break
             end
       end
+end
 
-      local sectionfs = self.sections['PACKFSLS'] or self.sections['PACKFSHD']
+function apk:unpack_all(path)
+      lfs.mkdir(path)
+      local sectionfsls = self.sections['PACKFSLS']
+      local sectionfshd = self.sections['PACKFSHD']
       local names = self.sections['GENESTRT'].names
 
-      print(#sectionfs.items)
-      print(#names)
-
-      for i, v in ipairs(sectionfs.items) do
-            local name = names[v.index + 1]
-            local type = name:match(".+(%..+)")
-            print('Unpack: ', name)
-            if not type then
-                  self.binaryreader.position = v.file_offset
-                  local nested_apk = apk(self.binaryreader, self.path .. '/' .. name)
-            else
-                  local folder_path = self.path
-                  for path in name:gmatch("([%w%d_]+)/") do
+      if sectionfsls then
+            for _, item in ipairs(sectionfsls.items) do
+                  local archive_path = names[item.index + 1]
+                  item.apkfile:unpack_all(path .. '/' .. archive_path)
+            end
+      end
+      if sectionfshd then
+            for _, item in ipairs(sectionfshd.items) do
+                  local folder_path = path
+                  local pathname = names[item.index + 1]
+                  print('Unpack: ', pathname)
+                  for path in pathname:gmatch("([%w%d_]+)/") do
                         folder_path = folder_path  .. '/' .. path
                         lfs.mkdir(folder_path)
                   end
-                  local file = io.open(self.path .. '/' .. name, 'wb')
-                  local size = v.size
+                  local file = io.open(path .. '/' .. pathname, 'wb')
+                  local size = item.size
                   if size > 0 then
-                        local offset = v.file_offset
-                        local unpacked_size = v.unpacked_size
-                        local data = self.binaryreader:read_raw_bytes(init_position + offset, size)
+                        local offset = item.file_offset
+                        local unpacked_size = item.unpacked_size
+                        local data = self.binaryreader:read_raw_bytes(offset, size)
                         local new_filedata = uncompress(data, unpacked_size)
                         file:write(new_filedata)
                   end

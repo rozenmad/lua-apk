@@ -7,7 +7,14 @@
 --]]
 
 local ffi = require 'ffi'
+local byteswap = require 'byteswap'
 local Stream = require 'stream'
+
+ffi.cdef[[
+uint16_t _byteswap_ushort ( uint16_t val );
+uint32_t _byteswap_ulong  ( uint32_t val );
+uint64_t _byteswap_uint64 ( uint64_t val );
+]]
 
 local binaryreader = {}
 binaryreader.__index = binaryreader
@@ -27,44 +34,63 @@ local function new(data, size)
       else
             stream = Stream.m_stream(data, size)
       end
-      return setmetatable({ position = 0, stream = stream }, binaryreader)
+      local object = { is_little_endian = true, _init_pos = 0, position = 0, stream = stream }
+      return setmetatable(object, binaryreader)
 end
 
-function binaryreader:ffi_pointer()
-      assert(false)
-      return self.c_str + self.position
+function binaryreader:new_from_position(new_position)
+      local object = {
+            is_little_endian = self.is_little_endian,
+            _init_pos = self._init_pos + (new_position or self.position),
+            position = 0,
+            stream = self.stream,
+      }
+      return setmetatable(object, binaryreader)
 end
 
 function binaryreader:alignment(align)
       self.position = math.ceil(self.position / align) * align
 end
 
-function binaryreader:read_byte()
+function binaryreader:relative_position()
+      return self._init_pos + self.position
+end
+
+function binaryreader:read_ubyte()
       local t = types.ubyte
-      local value = self.stream:unpack(self.position, t)
+      local ptr = self.stream:get_data_ptr(self:relative_position(), t)
       self.position = self.position + 1
-      return value
+      return ptr[0]
 end
 
 function binaryreader:read_int64()
       local t = types.int64
-      local value = self.stream:unpack(self.position, t)
+      local ptr = self.stream:get_data_ptr(self:relative_position(), t)
       self.position = self.position + 8
-      return value
+      if not self.is_little_endian then
+            return byteswap.int64(ptr, t)
+      end
+      return ptr[0]
 end
 
 function binaryreader:read_int32()
       local t = types.int32
-      local value = self.stream:unpack(self.position, t)
+      local ptr = self.stream:get_data_ptr(self:relative_position(), t)
       self.position = self.position + 4
-      return value
+      if not self.is_little_endian then
+            return byteswap.int32(ptr, t)
+      end
+      return ptr[0]
 end
 
 function binaryreader:read_int16()
       local t = types.int16
-      local value = self.stream:unpack(self.position, t)
+      local ptr = self.stream:get_data_ptr(self:relative_position(), t)
       self.position = self.position + 2
-      return value
+      if not self.is_little_endian then
+            return byteswap.int16(ptr, t)
+      end
+      return ptr[0]
 end
 
 function binaryreader:read_int32_array(count)
@@ -76,24 +102,24 @@ function binaryreader:read_int32_array(count)
 end
 
 function binaryreader:read_bytes(count)
+      assert(self.position + count < self:size(), 'read_bytes out of range')
       local bytes = {}
-      assert(self.position + count <= self.stream.size, 'read_bytes out of range')
       for i = 1, count do
-            table.insert(bytes, self:read_byte())
+            table.insert(bytes, self:read_ubyte())
       end
       return bytes
 end
 
 function binaryreader:read_string(count)
       if count then
-            assert(self.position + count <= self.stream.size, 'read_ascii_string out of range')
-            local s = self.stream:read_data(self.position, count)
+            assert(self.position + count < self:size(), 'read_ascii_string out of range')
+            local s = self.stream:read_data(self:relative_position(), count)
             self.position = self.position + count
             return ffi.string(s, count)
       else
             local bytes = {}
             while not self:is_eof() do
-                  local value = self:read_byte()
+                  local value = self:read_ubyte()
                   if value == 0 then
                         break
                   end
@@ -109,15 +135,15 @@ function binaryreader:read_string(count)
 end
 
 function binaryreader:read_raw_bytes(offset, size)
-      return self.stream:read_data(offset, size)
+      return self.stream:read_data(self._init_pos + offset, size)
 end
 
 function binaryreader:size()
-      return self.stream.size
+      return self.stream.size - self._init_pos
 end
 
 function binaryreader:is_eof()
-      return self.position >= self.stream.size
+      return self.position >= self:size()
 end
 
 return {

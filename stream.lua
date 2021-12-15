@@ -45,8 +45,8 @@ function m_stream:pack(position, size, value, t)
       ptr[0] = value
 end
 
-function m_stream:unpack(position, t)
-      return ffi.cast(t, self.buffer + position)[0]
+function m_stream:get_data_ptr(position, t)
+      return ffi.cast(t, self.buffer + position)
 end
 
 function m_stream:read_data(position, size)
@@ -76,10 +76,10 @@ function f_stream:pack(position, size, value, t)
       self.file:write(ptr, size)
 end
 
-function f_stream:unpack(position, t)
+function f_stream:get_data_ptr(position, t)
       self.file:seek('set', position)
-      self.file:read_buffer(self.buffer, 8)
-      return ffi.cast(t, self.buffer)[0]
+      self.file:read_to_buffer(self.buffer, 8)
+      return ffi.cast(t, self.buffer)
 end
 
 function f_stream:read_data(position, size)

@@ -1,6 +1,6 @@
 local lfs = require 'lfs'
 local apk = require 'apk'
-
+local stdio = require 'stdio'
 local BinaryReader = require 'binaryreader'
 local BinaryWriter = require 'binarywriter'
 
@@ -41,28 +41,15 @@ local function get_files(path)
 	return t1
 end
 
-local stdio = require 'stdio'
-
---local f = stdio.open('test.bin', 'wb')
-local bw = BinaryWriter.from_data()
-bw:write_string('hello world')
-bw:write_int32(1024)
-bw:write_int64(2048)
-local f = stdio.open('test.bin', 'wb')
-f:write(bw.stream.buffer, bw.position)
-f:close()
---f:close()
-
 local function read_apk()
       local t1 = os.time()
       local files = get_files('data/')
       for i, v in ipairs(files) do
             local f = stdio.open(v:get_fullpath_filename(), 'rb')
-		--local filedata = f:read()
-		--local filesize = f:size()
-		--print(filedata, filesize)
-		--local br = BinaryReader.new(f)
-            --local apk = apk(br, 'unpacked/')
+		local br = BinaryReader.new(f)
+            local apk = apk(br)
+		apk:unpack_all('unpacked')
+		f:close()
       end
       print('Time: ', (os.time() - t1) / 60)
 end
