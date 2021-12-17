@@ -8,6 +8,7 @@
 
 local ffi = require 'ffi'
 local byteswap = require 'byteswap'
+local common = require 'common'
 local Stream = require 'stream'
 
 ffi.cdef[[
@@ -49,7 +50,7 @@ function binaryreader:new_from_position(new_position)
 end
 
 function binaryreader:alignment(align)
-      self.position = math.ceil(self.position / align) * align
+      self.position = self.position + common.alignment(self._init_pos + self.position, align)
 end
 
 function binaryreader:relative_position()
@@ -136,6 +137,26 @@ end
 
 function binaryreader:read_raw_bytes(offset, size)
       return self.stream:read_data(self._init_pos + offset, size)
+end
+
+function binaryreader:search_bytes(bytes, i, j)
+      i = i or 0
+      j = j or (self.size - 1)
+      local t = {}
+      for pos = i, j do
+            self.position = pos
+            local find = true
+            for _, v in ipairs(bytes) do
+                  if v ~= self:read_ubyte() then
+                        find = false
+                        break
+                  end
+            end
+            if find then
+                  table.insert(t, pos)
+            end
+      end
+      return t
 end
 
 function binaryreader:size()

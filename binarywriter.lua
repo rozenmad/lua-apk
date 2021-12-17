@@ -8,6 +8,7 @@
 
 local ffi = require 'ffi'
 local byteswap = require 'byteswap'
+local common = require 'common'
 local Stream = require 'stream'
 
 local binarywriter = {}
@@ -26,7 +27,8 @@ local function from_file(file)
       if type(file) == 'table' and file.class_name == 'STDIOFILE' then
             stream = Stream.f_stream(file)
       end
-      return setmetatable({ position = 0, stream = stream }, binarywriter)
+      local object = { is_little_endian = true, _init_pos = 0, position = 0, stream = stream }
+      return setmetatable(object, binarywriter)
 end
 
 local function from_data(data)
@@ -36,12 +38,34 @@ local function from_data(data)
       else
             stream = Stream.m_stream('')
       end
-      return setmetatable({ position = 0, stream = stream }, binarywriter)
+      local object = { is_little_endian = true, _init_pos = 0, position = 0, stream = stream }
+      return setmetatable(object, binarywriter)
+end
+
+function binarywriter:new_from_position(new_position)
+      local object = {
+            is_little_endian = self.is_little_endian,
+            _init_pos = self._init_pos + (new_position or self.position),
+            position = 0,
+            stream = self.stream,
+      }
+      return setmetatable(object, binarywriter)
+end
+
+function binarywriter:alignment(align)
+      local offset = common.alignment(self._init_pos + self.position, align)
+      if offset > 0 then
+            self:fill(offset, 0)
+      end
+end
+
+function binarywriter:relative_position()
+      return self._init_pos + self.position
 end
 
 function binarywriter:write_ubyte(value)
       local t = types.ubyte
-      self.stream:pack(self.position, 1, value, t)
+      self.stream:pack(self:relative_position(), 1, value, t)
       self.position = self.position + 1
 end
 
@@ -51,7 +75,7 @@ function binarywriter:write_int16(value)
             byteswap.union.i16 = value
             value = byteswap.int16(byteswap.union, t)
       end
-      self.stream:pack(self.position, 2, value, t)
+      self.stream:pack(self:relative_position(), 2, value, t)
       self.position = self.position + 2
 end
 
@@ -61,7 +85,7 @@ function binarywriter:write_int32(value)
             byteswap.union.i32 = value
             value = byteswap.int32(byteswap.union, t)
       end
-      self.stream:pack(self.position, 4, value, t)
+      self.stream:pack(self:relative_position(), 4, value, t)
       self.position = self.position + 4
 end
 
@@ -71,7 +95,7 @@ function binarywriter:write_int64(value)
             byteswap.union.i64 = value
             value = byteswap.int64(byteswap.union, t)
       end
-      self.stream:pack(self.position, 8, value, t)
+      self.stream:pack(self:relative_position(), 8, value, t)
       self.position = self.position + 8
 end
 
@@ -87,19 +111,23 @@ function binarywriter:write_bytes(bytearray)
       end
 end
 
+function binarywriter:write_raw_bytes(ptr, size)
+      self.stream:write_data(self:relative_position(), size, ptr)
+      self.position = self.position + size
+end
+
 function binarywriter:fill(size, value)
       for i = 1, size do
             self:write_ubyte(value)
-            self.position = self.position + 1
       end
 end
 
 function binarywriter:write_string(s)
       local size = #s
-      local c_str = ffi.new("uint8_t[?]", size + 1)
+      local c_str = ffi.new("uint8_t[?]", size)
       ffi.copy(c_str, s, size)
-      self.stream:write_data(self.position, size + 1, c_str)
-      self.position = self.position + size + 1
+      self.stream:write_data(self:relative_position(), size, c_str)
+      self.position = self.position + size
 end
 
 return {
